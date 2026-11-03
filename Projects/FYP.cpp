@@ -5,12 +5,14 @@
 #include <cstring>
 #include <algorithm>
 
-// ANSI Color Codes for Terminal Dashboard
-#define RESET   "\033[0m"
-#define GREEN   "\033[32m" // Free Block
-#define RED     "\033[31m" // Allocated Block
-#define CYAN    "\033[36m" // Stats
-#define YELLOW  "\033[33m" // Menu
+// Refined ANSI Color Palette
+#define RESET         "\033[0m"
+#define FREE_COLOR    "\033[34m" // Blue for Free blocks
+#define ALLOC_COLOR   "\033[35m" // Magenta for Allocated blocks
+#define STATS_COLOR   "\033[36m" // Cyan for Stats & Headers
+#define MENU_COLOR    "\033[33m" // Yellow for Menus
+#define SUCCESS_COLOR "\033[32m" // Green for Success
+#define ERROR_COLOR   "\033[31m" // Red for Errors
 
 class MemoryPool {
 private:
@@ -34,11 +36,11 @@ public:
 
     void* allocate(size_t requestedSize) {
         if (requestedSize == 0) {
-            std::cout << RED << "[Error] Cannot allocate 0 bytes!\n" << RESET;
+            std::cout << ERROR_COLOR << "[Error] Cannot allocate 0 bytes!\n" << RESET;
             return nullptr;
         }
         if (requestedSize > totalPoolSize) {
-            std::cout << RED << "[Error] Requested size exceeds total pool capacity!\n" << RESET;
+            std::cout << ERROR_COLOR << "[Error] Requested size exceeds total pool capacity!\n" << RESET;
             return nullptr;
         }
 
@@ -63,7 +65,7 @@ public:
             }
             current = current->next;
         }
-        std::cout << RED << "[Error] Out of Memory! No contiguous free block large enough.\n" << RESET;
+        std::cout << ERROR_COLOR << "[Error] Out of Memory! No contiguous free block large enough.\n" << RESET;
         return nullptr;
     }
 
@@ -85,14 +87,14 @@ public:
     }
 
     void visualize() {
-        std::cout << CYAN << "\n================== MEMORY POOL MAP ==================\n" << RESET;
+        std::cout << STATS_COLOR << "\n================== MEMORY POOL MAP ==================\n" << RESET;
         BlockHeader* current = head;
         int index = 0;
         size_t freeSpace = 0, usedSpace = 0;
 
         while (current != nullptr) {
             std::string status = current->isFree ? "FREE" : "ALLOCATED";
-            std::string color = current->isFree ? GREEN : RED;
+            std::string color = current->isFree ? FREE_COLOR : ALLOC_COLOR;
 
             std::cout << color << "[" << index << "] " << status 
                       << " (" << current->size << " bytes)" << RESET << " -> ";
@@ -104,7 +106,7 @@ public:
             index++;
         }
         std::cout << "nullptr\n";
-        std::cout << CYAN << "-----------------------------------------------------\n";
+        std::cout << STATS_COLOR << "-----------------------------------------------------\n";
         std::cout << "Total Pool Capacity : " << totalPoolSize << " bytes\n";
         std::cout << "Active Allocated    : " << usedSpace << " bytes\n";
         std::cout << "Available Free Space: " << freeSpace << " bytes\n";
@@ -120,7 +122,7 @@ struct AllocationRecord {
 
 int main() {
     size_t initialSize;
-    std::cout << CYAN << "=== WELCOME TO ARENAALLOC INTERACTIVE MANAGER ===\n" << RESET;
+    std::cout << STATS_COLOR << "=== WELCOME TO ARENAALLOC INTERACTIVE MANAGER ===\n" << RESET;
     std::cout << "Enter custom memory pool size (in bytes, e.g., 1024 or 4096): ";
     if (!(std::cin >> initialSize)) return 0;
 
@@ -130,7 +132,7 @@ int main() {
 
     int choice;
     do {
-        std::cout << YELLOW << "\n--- CHOOSE AN ACTION ---\n" << RESET;
+        std::cout << MENU_COLOR << "\n--- CHOOSE AN ACTION ---\n" << RESET;
         std::cout << "1. Allocate Memory\n";
         std::cout << "2. Write Data into Allocated Block\n";
         std::cout << "3. View All Stored Data Content\n";
@@ -140,7 +142,7 @@ int main() {
         std::cout << "Enter your choice (1-6): ";
         
         if (!(std::cin >> choice)) {
-            std::cout << RED << "[Error] Invalid input type!\n" << RESET;
+            std::cout << ERROR_COLOR << "[Error] Invalid input type!\n" << RESET;
             std::cin.clear();
             std::cin.ignore(10000, '\n');
             continue;
@@ -153,10 +155,9 @@ int main() {
                 std::cin >> bytes;
                 void* p = myPool.allocate(bytes);
                 if (p) {
-                    // Initialize block with empty string/zeros for safety
                     std::memset(p, 0, bytes);
                     activeAllocs.push_back({nextId, p, bytes});
-                    std::cout << GREEN << "[Success] Allocated " << bytes << " bytes. Assigned Allocation ID: " << nextId << "\n" << RESET;
+                    std::cout << SUCCESS_COLOR << "[Success] Allocated " << bytes << " bytes. Assigned Allocation ID: " << nextId << "\n" << RESET;
                     nextId++;
                 }
                 myPool.visualize();
@@ -164,7 +165,7 @@ int main() {
             }
             case 2: { // Write Data
                 if (activeAllocs.empty()) {
-                    std::cout << RED << "[Notice] No active allocations to write into!\n" << RESET;
+                    std::cout << ERROR_COLOR << "[Notice] No active allocations to write into!\n" << RESET;
                     break;
                 }
                 std::cout << "\nActive Allocations:\n";
@@ -182,27 +183,32 @@ int main() {
                 if (it != activeAllocs.end()) {
                     std::string textInput;
                     std::cout << "Enter text to store (max " << it->size - 1 << " bytes): ";
-                    std::cin.ignore(); // Clear newline buffer
+                    std::cin.ignore();
                     std::getline(std::cin, textInput);
 
-                    // Safely copy text into the raw memory address pointer
                     char* dest = static_cast<char*>(it->ptr);
+                    bool hasExistingData = (dest[0] != '\0');
+
                     size_t copyLen = std::min(textInput.size(), it->size - 1);
                     std::memcpy(dest, textInput.c_str(), copyLen);
-                    dest[copyLen] = '\0'; // Null-terminate string
+                    dest[copyLen] = '\0';
 
-                    std::cout << GREEN << "[Success] Data written to Allocation ID " << targetId << "!\n" << RESET;
+                    if (hasExistingData) {
+                        std::cout << SUCCESS_COLOR << "[Success] Updated data in Allocation ID " << targetId << "!\n" << RESET;
+                    } else {
+                        std::cout << SUCCESS_COLOR << "[Success] Data written to Allocation ID " << targetId << "!\n" << RESET;
+                    }
                 } else {
-                    std::cout << RED << "[Error] Invalid Allocation ID!\n" << RESET;
+                    std::cout << ERROR_COLOR << "[Error] Invalid Allocation ID!\n" << RESET;
                 }
                 break;
             }
             case 3: { // View Stored Data
                 if (activeAllocs.empty()) {
-                    std::cout << RED << "[Notice] No active allocations to inspect!\n" << RESET;
+                    std::cout << ERROR_COLOR << "[Notice] No active allocations to inspect!\n" << RESET;
                     break;
                 }
-                std::cout << CYAN << "\n================ STORED DATA INSPECTOR ================\n" << RESET;
+                std::cout << STATS_COLOR << "\n================ STORED DATA INSPECTOR ================\n" << RESET;
                 for (const auto& rec : activeAllocs) {
                     char* dataPtr = static_cast<char*>(rec.ptr);
                     std::cout << "ID: " << rec.id << " | Size: " << rec.size << " bytes\n";
@@ -214,7 +220,7 @@ int main() {
             }
             case 4: { // Deallocate
                 if (activeAllocs.empty()) {
-                    std::cout << RED << "[Notice] No active allocations to free!\n" << RESET;
+                    std::cout << ERROR_COLOR << "[Notice] No active allocations to free!\n" << RESET;
                     break;
                 }
                 std::cout << "\nActive Allocations:\n";
@@ -231,10 +237,10 @@ int main() {
 
                 if (it != activeAllocs.end()) {
                     myPool.deallocate(it->ptr);
-                    std::cout << GREEN << "[Success] Freed Allocation ID " << targetId << "\n" << RESET;
+                    std::cout << SUCCESS_COLOR << "[Success] Freed Allocation ID " << targetId << "!\n" << RESET;
                     activeAllocs.erase(it);
                 } else {
-                    std::cout << RED << "[Error] Invalid Allocation ID!\n" << RESET;
+                    std::cout << ERROR_COLOR << "[Error] Invalid Allocation ID!\n" << RESET;
                 }
                 myPool.visualize();
                 break;
@@ -246,7 +252,7 @@ int main() {
                 std::cout << "Exiting ArenaAlloc. Good luck with your FYP defense!\n";
                 break;
             default:
-                std::cout << RED << "Invalid choice! Please enter 1-6.\n" << RESET;
+                std::cout << ERROR_COLOR << "Invalid choice! Please enter 1-6.\n" << RESET;
         }
     } while (choice != 6);
 
