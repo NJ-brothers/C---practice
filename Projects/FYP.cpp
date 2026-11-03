@@ -2,6 +2,8 @@
 #include <vector>
 #include <cstdint>
 #include <string>
+#include <cstring>
+#include <algorithm>
 
 // ANSI Color Codes for Terminal Dashboard
 #define RESET   "\033[0m"
@@ -31,7 +33,15 @@ public:
     }
 
     void* allocate(size_t requestedSize) {
-        if (requestedSize == 0) return nullptr;
+        if (requestedSize == 0) {
+            std::cout << RED << "[Error] Cannot allocate 0 bytes!\n" << RESET;
+            return nullptr;
+        }
+        if (requestedSize > totalPoolSize) {
+            std::cout << RED << "[Error] Requested size exceeds total pool capacity!\n" << RESET;
+            return nullptr;
+        }
+
         size_t alignedSize = (requestedSize + 7) & ~7;
         BlockHeader* current = head;
         
@@ -53,7 +63,7 @@ public:
             }
             current = current->next;
         }
-        std::cout << RED << "[Error] Out of Memory! Requested size too large.\n" << RESET;
+        std::cout << RED << "[Error] Out of Memory! No contiguous free block large enough.\n" << RESET;
         return nullptr;
     }
 
@@ -112,7 +122,7 @@ int main() {
     size_t initialSize;
     std::cout << CYAN << "=== WELCOME TO ARENAALLOC INTERACTIVE MANAGER ===\n" << RESET;
     std::cout << "Enter custom memory pool size (in bytes, e.g., 1024 or 4096): ";
-    std::cin >> initialSize;
+    if (!(std::cin >> initialSize)) return 0;
 
     MemoryPool myPool(initialSize);
     std::vector<AllocationRecord> activeAllocs;
@@ -122,11 +132,19 @@ int main() {
     do {
         std::cout << YELLOW << "\n--- CHOOSE AN ACTION ---\n" << RESET;
         std::cout << "1. Allocate Memory\n";
-        std::cout << "2. Deallocate Memory (Free)\n";
-        std::cout << "3. View Memory Map\n";
-        std::cout << "4. Exit\n";
-        std::cout << "Enter your choice (1-4): ";
-        std::cin >> choice;
+        std::cout << "2. Write Data into Allocated Block\n";
+        std::cout << "3. View All Stored Data Content\n";
+        std::cout << "4. Deallocate Memory (Free)\n";
+        std::cout << "5. View Memory Map\n";
+        std::cout << "6. Exit\n";
+        std::cout << "Enter your choice (1-6): ";
+        
+        if (!(std::cin >> choice)) {
+            std::cout << RED << "[Error] Invalid input type!\n" << RESET;
+            std::cin.clear();
+            std::cin.ignore(10000, '\n');
+            continue;
+        }
 
         switch (choice) {
             case 1: {
@@ -135,6 +153,8 @@ int main() {
                 std::cin >> bytes;
                 void* p = myPool.allocate(bytes);
                 if (p) {
+                    // Initialize block with empty string/zeros for safety
+                    std::memset(p, 0, bytes);
                     activeAllocs.push_back({nextId, p, bytes});
                     std::cout << GREEN << "[Success] Allocated " << bytes << " bytes. Assigned Allocation ID: " << nextId << "\n" << RESET;
                     nextId++;
@@ -142,45 +162,93 @@ int main() {
                 myPool.visualize();
                 break;
             }
-            case 2: {
+            case 2: { // Write Data
+                if (activeAllocs.empty()) {
+                    std::cout << RED << "[Notice] No active allocations to write into!\n" << RESET;
+                    break;
+                }
+                std::cout << "\nActive Allocations:\n";
+                for (const auto& rec : activeAllocs) {
+                    std::cout << "  [Allocation ID: " << rec.id << "] -> Capacity: " << rec.size << " bytes\n";
+                }
+                int targetId;
+                std::cout << "Enter Allocation ID to write text into: ";
+                std::cin >> targetId;
+
+                auto it = std::find_if(activeAllocs.begin(), activeAllocs.end(), [targetId](const AllocationRecord& r) {
+                    return r.id == targetId;
+                });
+
+                if (it != activeAllocs.end()) {
+                    std::string textInput;
+                    std::cout << "Enter text to store (max " << it->size - 1 << " bytes): ";
+                    std::cin.ignore(); // Clear newline buffer
+                    std::getline(std::cin, textInput);
+
+                    // Safely copy text into the raw memory address pointer
+                    char* dest = static_cast<char*>(it->ptr);
+                    size_t copyLen = std::min(textInput.size(), it->size - 1);
+                    std::memcpy(dest, textInput.c_str(), copyLen);
+                    dest[copyLen] = '\0'; // Null-terminate string
+
+                    std::cout << GREEN << "[Success] Data written to Allocation ID " << targetId << "!\n" << RESET;
+                } else {
+                    std::cout << RED << "[Error] Invalid Allocation ID!\n" << RESET;
+                }
+                break;
+            }
+            case 3: { // View Stored Data
+                if (activeAllocs.empty()) {
+                    std::cout << RED << "[Notice] No active allocations to inspect!\n" << RESET;
+                    break;
+                }
+                std::cout << CYAN << "\n================ STORED DATA INSPECTOR ================\n" << RESET;
+                for (const auto& rec : activeAllocs) {
+                    char* dataPtr = static_cast<char*>(rec.ptr);
+                    std::cout << "ID: " << rec.id << " | Size: " << rec.size << " bytes\n";
+                    std::cout << "Stored Content : \"" << (dataPtr[0] != '\0' ? dataPtr : "(empty buffer)") << "\"\n";
+                    std::cout << "-------------------------------------------------------\n";
+                }
+                std::cout << RESET;
+                break;
+            }
+            case 4: { // Deallocate
                 if (activeAllocs.empty()) {
                     std::cout << RED << "[Notice] No active allocations to free!\n" << RESET;
                     break;
                 }
                 std::cout << "\nActive Allocations:\n";
-                for (size_t i = 0; i < activeAllocs.size(); ++i) {
-                    std::cout << "  [Ref ID: " << activeAllocs[i].id << "] -> Size: " << activeAllocs[i].size << " bytes\n";
+                for (const auto& rec : activeAllocs) {
+                    std::cout << "  [Ref ID: " << rec.id << "] -> Size: " << rec.size << " bytes\n";
                 }
                 int targetId;
                 std::cout << "Enter the Allocation ID you want to free: ";
                 std::cin >> targetId;
 
-                bool found = false;
-                for (auto it = activeAllocs.begin(); it != activeAllocs.end(); ++it) {
-                    if (it->id == targetId) {
-                        myPool.deallocate(it->ptr);
-                        std::cout << GREEN << "[Success] Freed Allocation ID " << targetId << "\n" << RESET;
-                        activeAllocs.erase(it);
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) {
+                auto it = std::find_if(activeAllocs.begin(), activeAllocs.end(), [targetId](const AllocationRecord& r) {
+                    return r.id == targetId;
+                });
+
+                if (it != activeAllocs.end()) {
+                    myPool.deallocate(it->ptr);
+                    std::cout << GREEN << "[Success] Freed Allocation ID " << targetId << "\n" << RESET;
+                    activeAllocs.erase(it);
+                } else {
                     std::cout << RED << "[Error] Invalid Allocation ID!\n" << RESET;
                 }
                 myPool.visualize();
                 break;
             }
-            case 3:
+            case 5:
                 myPool.visualize();
                 break;
-            case 4:
+            case 6:
                 std::cout << "Exiting ArenaAlloc. Good luck with your FYP defense!\n";
                 break;
             default:
-                std::cout << RED << "Invalid choice! Please enter 1-4.\n" << RESET;
+                std::cout << RED << "Invalid choice! Please enter 1-6.\n" << RESET;
         }
-    } while (choice != 4);
+    } while (choice != 6);
 
     return 0;
 }
