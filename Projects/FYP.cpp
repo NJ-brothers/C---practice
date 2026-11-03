@@ -1,52 +1,46 @@
 #include <iostream>
 #include <vector>
 #include <cstdint>
-#include <iomanip>
 #include <string>
 
-// ANSI Color Codes for Terminal Visualization
+// ANSI Color Codes for Terminal Dashboard
 #define RESET   "\033[0m"
 #define GREEN   "\033[32m" // Free Block
 #define RED     "\033[31m" // Allocated Block
-#define YELLOW  "\033[33m" // Metadata / Borders
 #define CYAN    "\033[36m" // Stats
+#define YELLOW  "\033[33m" // Menu
 
 class MemoryPool {
 private:
     struct BlockHeader {
-        size_t size;          // Size of the payload data block
-        bool isFree;          // True if available, false if allocated
-        BlockHeader* next;    // Pointer to the next block in memory order
+        size_t size;
+        bool isFree;
+        BlockHeader* next;
     };
 
     size_t totalPoolSize;
-    std::vector<char> pool;   // The raw backing memory buffer
-    BlockHeader* head;        // Start of the block list
+    std::vector<char> pool;
+    BlockHeader* head;
 
 public:
     MemoryPool(size_t size) : totalPoolSize(size), pool(size) {
-        // Initialize the entire pool as one big free block
         head = reinterpret_cast<BlockHeader*>(pool.data());
         head->size = totalPoolSize - sizeof(BlockHeader);
         head->isFree = true;
         head->next = nullptr;
-        std::cout << CYAN << "[Init] Memory Pool initialized with " << totalPoolSize << " bytes.\n" << RESET;
     }
 
-    // Custom Allocate Function (First-Fit Strategy)
     void* allocate(size_t requestedSize) {
-        // Align requested size to 8-byte boundaries for CPU efficiency
+        if (requestedSize == 0) return nullptr;
         size_t alignedSize = (requestedSize + 7) & ~7;
-        
         BlockHeader* current = head;
+        
         while (current != nullptr) {
             if (current->isFree && current->size >= alignedSize) {
-                // Check if we can split the block
                 if (current->size >= alignedSize + sizeof(BlockHeader) + 8) {
                     BlockHeader* nextBlock = reinterpret_cast<BlockHeader*>(
                         reinterpret_cast<char*>(current + 1) + alignedSize
                     );
-                    
                     nextBlock->size = current->size - alignedSize - sizeof(BlockHeader);
                     nextBlock->isFree = true;
                     nextBlock->next = current->next;
@@ -54,26 +48,21 @@ public:
                     current->size = alignedSize;
                     current->next = nextBlock;
                 }
-
                 current->isFree = false;
-                return static_cast<void*>(current + 1); // Return pointer to payload
+                return static_cast<void*>(current + 1);
             }
             current = current->next;
         }
-
-        std::cerr << RED << "[Error] Out of Memory! Allocation failed for " << requestedSize << " bytes.\n" << RESET;
+        std::cout << RED << "[Error] Out of Memory! Requested size too large.\n" << RESET;
         return nullptr;
     }
 
-    // Custom Deallocate Function with Coalescing
     void deallocate(void* ptr) {
         if (!ptr) return;
-
-        // Retrieve header from payload pointer
         BlockHeader* targetBlock = reinterpret_cast<BlockHeader*>(ptr) - 1;
         targetBlock->isFree = true;
 
-        // Coalesce adjacent free blocks to prevent fragmentation
+        // Coalescing engine
         BlockHeader* current = head;
         while (current != nullptr && current->next != nullptr) {
             if (current->isFree && current->next->isFree) {
@@ -85,69 +74,113 @@ public:
         }
     }
 
-    // Terminal Visualizer & Statistics Dashboard
     void visualize() {
-        std::cout << "\n" << CYAN << "================== MEMORY POOL MAP ==================\n" << RESET;
-        
+        std::cout << CYAN << "\n================== MEMORY POOL MAP ==================\n" << RESET;
         BlockHeader* current = head;
-        int blockIndex = 0;
-        size_t totalAllocated = 0;
-        size_t totalFree = 0;
+        int index = 0;
+        size_t freeSpace = 0, usedSpace = 0;
 
         while (current != nullptr) {
             std::string status = current->isFree ? "FREE" : "ALLOCATED";
             std::string color = current->isFree ? GREEN : RED;
 
-            std::cout << color << "[" << blockIndex << "] " 
-                      << status << " (" << current->size << " bytes)" << RESET << " -> ";
+            std::cout << color << "[" << index << "] " << status 
+                      << " (" << current->size << " bytes)" << RESET << " -> ";
 
-            if (current->isFree) totalFree += current->size;
-            else totalAllocated += current->size;
+            if (current->isFree) freeSpace += current->size;
+            else usedSpace += current->size;
 
             current = current->next;
-            blockIndex++;
+            index++;
         }
-        std::cout << YELLOW << "nullptr\n" << RESET;
-
+        std::cout << "nullptr\n";
         std::cout << CYAN << "-----------------------------------------------------\n";
         std::cout << "Total Pool Capacity : " << totalPoolSize << " bytes\n";
-        std::cout << "Active Allocated    : " << totalAllocated << " bytes\n";
-        std::cout << "Available Free Space: " << totalFree << " bytes\n";
-        std::cout << "=====================================================\n\n" << RESET;
+        std::cout << "Active Allocated    : " << usedSpace << " bytes\n";
+        std::cout << "Available Free Space: " << freeSpace << " bytes\n";
+        std::cout << "=====================================================\n" << RESET;
     }
 };
 
-// Interactive Test Program
+struct AllocationRecord {
+    int id;
+    void* ptr;
+    size_t size;
+};
+
 int main() {
-    // Create a memory pool of 1024 bytes
-    MemoryPool myPool(102004);
+    size_t initialSize;
+    std::cout << CYAN << "=== WELCOME TO ARENAALLOC INTERACTIVE MANAGER ===\n" << RESET;
+    std::cout << "Enter custom memory pool size (in bytes, e.g., 1024 or 4096): ";
+    std::cin >> initialSize;
 
-    myPool.visualize();
+    MemoryPool myPool(initialSize);
+    std::vector<AllocationRecord> activeAllocs;
+    int nextId = 1;
 
-    // Allocate some blocks
-    std::cout << "[Action] Allocating 128 bytes (p1)...\n";
-    void* p1 = myPool.allocate(128);
-    myPool.visualize();
+    int choice;
+    do {
+        std::cout << YELLOW << "\n--- CHOOSE AN ACTION ---\n" << RESET;
+        std::cout << "1. Allocate Memory\n";
+        std::cout << "2. Deallocate Memory (Free)\n";
+        std::cout << "3. View Memory Map\n";
+        std::cout << "4. Exit\n";
+        std::cout << "Enter your choice (1-4): ";
+        std::cin >> choice;
 
-    std::cout << "[Action] Allocating 256 bytes (p2)...\n";
-    void* p2 = myPool.allocate(256);
-    myPool.visualize();
+        switch (choice) {
+            case 1: {
+                size_t bytes;
+                std::cout << "Enter number of bytes to allocate: ";
+                std::cin >> bytes;
+                void* p = myPool.allocate(bytes);
+                if (p) {
+                    activeAllocs.push_back({nextId, p, bytes});
+                    std::cout << GREEN << "[Success] Allocated " << bytes << " bytes. Assigned Allocation ID: " << nextId << "\n" << RESET;
+                    nextId++;
+                }
+                myPool.visualize();
+                break;
+            }
+            case 2: {
+                if (activeAllocs.empty()) {
+                    std::cout << RED << "[Notice] No active allocations to free!\n" << RESET;
+                    break;
+                }
+                std::cout << "\nActive Allocations:\n";
+                for (size_t i = 0; i < activeAllocs.size(); ++i) {
+                    std::cout << "  [Ref ID: " << activeAllocs[i].id << "] -> Size: " << activeAllocs[i].size << " bytes\n";
+                }
+                int targetId;
+                std::cout << "Enter the Allocation ID you want to free: ";
+                std::cin >> targetId;
 
-    std::cout << "[Action] Allocating 64 bytes (p3)...\n";
-    void* p3 = myPool.allocate(64);
-    myPool.visualize();
-
-    // Free a block to demonstrate coalescing
-    std::cout << "[Action] Deallocating p2 (256 bytes)...\n";
-    myPool.deallocate(p2);
-    myPool.visualize();
-
-    std::cout << "[Action] Deallocating p1 (128 bytes)...\n";
-    myPool.deallocate(p1);
-    myPool.visualize();
-
-    // Clean up remaining
-    myPool.deallocate(p3);
+                bool found = false;
+                for (auto it = activeAllocs.begin(); it != activeAllocs.end(); ++it) {
+                    if (it->id == targetId) {
+                        myPool.deallocate(it->ptr);
+                        std::cout << GREEN << "[Success] Freed Allocation ID " << targetId << "\n" << RESET;
+                        activeAllocs.erase(it);
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    std::cout << RED << "[Error] Invalid Allocation ID!\n" << RESET;
+                }
+                myPool.visualize();
+                break;
+            }
+            case 3:
+                myPool.visualize();
+                break;
+            case 4:
+                std::cout << "Exiting ArenaAlloc. Good luck with your FYP defense!\n";
+                break;
+            default:
+                std::cout << RED << "Invalid choice! Please enter 1-4.\n" << RESET;
+        }
+    } while (choice != 4);
 
     return 0;
 }
