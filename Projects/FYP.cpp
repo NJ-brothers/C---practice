@@ -1,3 +1,8 @@
+// Simplify the Program
+// Use arrays instead of vector
+// remove unused logic
+// remove algorithm library and make it work without it
+
 #include <iostream>
 #include <vector>
 #include <cstdint>
