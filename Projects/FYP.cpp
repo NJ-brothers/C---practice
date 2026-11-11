@@ -196,7 +196,7 @@ int main() {
                 myPool.visualize();
                 break;
             }
-            case 2: { // Write Data
+case 2: { // Write / Update Data
                 bool anyActive = false;
                 for (size_t i = 0; i < allocCount; ++i) {
                     if (activeAllocs[i].active) {
@@ -218,13 +218,20 @@ int main() {
 
                 int targetId;
                 std::cout << "Enter Allocation ID to write text into: ";
-                std::cin >> targetId;
+                if (!(std::cin >> targetId)) {
+                    std::cout << ERROR_COLOR << "[Error] Invalid ID input!\n" << RESET;
+                    std::cin.clear();
+                    std::cin.ignore(10000, '\n');
+                    break;
+                }
+
+                // CRITICAL FIX: Fully flush the input buffer newline before getline
+                std::cin.ignore(10000, '\n');
 
                 int idx = findRecordIndex(activeAllocs, allocCount, targetId);
                 if (idx != -1) {
                     std::string textInput;
                     std::cout << "Enter text to store (max " << activeAllocs[idx].size - 1 << " bytes): ";
-                    std::cin.ignore();
                     std::getline(std::cin, textInput);
 
                     char* dest = static_cast<char*>(activeAllocs[idx].ptr);
